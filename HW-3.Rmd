@@ -1,6 +1,6 @@
 ---
 title: "MATH 216 Homework 3"
-author: "WRITE YOUR NAME HERE"
+author: "Kyler Blodgett"
 output: html_document
 ---
 
@@ -9,6 +9,9 @@ suppressPackageStartupMessages(library(ggplot2))
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(lubridate))
 suppressPackageStartupMessages(library(Quandl))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(pander))
 ```
 
 
@@ -16,9 +19,9 @@ suppressPackageStartupMessages(library(Quandl))
 
 Please indicate
 
-* Who you collaborated with:
-* Roughly how much time you spent on this HW:
-* What gave you the most trouble:
+* Who you collaborated with: Laney, Christian, Paul
+* Roughly how much time you spent on this HW: 7 hours
+* What gave you the most trouble: Creating the 2x2 contingency table in 1(c). And manipulating the data in question 2 so that weeks didn't appear as "Week 12" but as actual dates.  
 * Any comments you have: 
 
 
@@ -50,12 +53,34 @@ specifically the OkCupid dataset.
 ### a)
 
 Using your exploratory data analysis from HW-2, fit a logistic regression to
-predict individual's gender and interpret your results.
+predict individual's gender and interpret your results.When fitting the logistic regression, you can put both the categorical variable and the numerical variable you've chosen in the same model
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
+profiles1 <- mutate(profiles, is.female = ifelse(sex=="f", 1, 0)) %>%
+  separate(ethnicity, c("eth1", "eth_rest"), sep=",") %>%
+  na.omit(eth1)
+
+model <- glm(is.female ~ height + eth1, family = binomial, data=profiles1)
+summary(model)
+pander(model)
+
+profiles_eth <- profiles1 %>%
+  group_by(eth1) %>%
+  tally()
+
+profiles <- mutate(profiles, is.female = ifelse(sex=="f", 1, 0)) 
+mean(profiles$is.female)
+
+ggplot(data=profiles_eth, aes(x=reorder(eth1, -n), y=n)) +
+  geom_bar(stat= "Identity") +
+  ggtitle("Proprortion of Primary Ethnicities among Users who Identified") +
+  labs(x="Ethnicities", y="Number of Users") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ```
 
+Here, I choose height as my continuous variable and first listed ethnicity ("eth1") as my categorical variable in predicting sex. Though many of the model's predictor variables are statistically significant (P-value < 0.05, with the excepton of indian and pacific islander ethnicities), most of the predicted coefficients are problematic. Coefficients represent the increase in percent likelihood that a given user is female associated with a unit increase in the predictor variable. Thus, the model predicts that an inch increase in hieght is associated with a 66% drecrease in likelihood of being female. This effect is unrealistically large. Similarly, claiming "black" as one's primary ethnicity is associated with a 147% increase in likelihood of being female, an effect so high it is nonsensical. The other categorical ethnicity predictor variables that are statistically significant also have absurdly high coefficients, the minimum having an absolute value of 0.65. We thus conclude that the model is not accurately predicting sex.
+It is important to bear in mind that in only considering individuals that list at least one ethnicity, the model only considers around 12% of users, or 6859 observations. However, we are pretty protected from selection bias since among the users who listed an ethnicity, 38% are female, compared with 40% in the full data set. 
 
 ### b)
 
@@ -63,9 +88,10 @@ Plot a histogram of the fitted probabilities $\widehat{p}_i$ for all users $i=1,
 \ldots, n=59946$ in your dataset.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
-
+hist(fitted(model))
 ```
 
+Note again that because of the way I coded the ethnicity categorical variable, only users that listed at least one ethnicity are included in the observations that my model considered. This population is about 12% of the total user population. 
 
 ### c)
 
@@ -80,11 +106,31 @@ predicted sex to the actual sex of all users. The sum of all the elements in
 your table should be $n=59946$. Comment on how well our predictions fared.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
+profiles1 <- profiles1 %>%
+  mutate(pred= predict(model)) %>%
+  mutate(predicted_sex = ifelse(pred>=0.5, 1, 0)) %>%
+  mutate(pred_male_true = ifelse(predicted_sex ==0 & is.female==0, 1, 0)) %>% 
+  mutate(pred_male_false = ifelse(predicted_sex ==0 & is.female==1, 1, 0)) %>% #if predicted male but was actually a female
+  mutate(pred_fem_true = ifelse(predicted_sex ==1 & is.female==1, 1, 0)) %>%
+  mutate(pred_fem_false = ifelse(predicted_sex ==1 & is.female==0, 1, 0)) 
 
+sum(profiles1$pred_male_true)
+sum(profiles1$pred_male_false)
+sum(profiles1$pred_fem_true)
+sum(profiles1$pred_fem_false)
+
+possible_outcomes <- c("pred_male_true", "pred_male_false", "pred_fem_true", "pred_fem_false")
+amount <- c(sum(profiles1$pred_male_true), sum(profiles1$pred_male_false), sum(profiles1$pred_fem_true), sum(profiles1$pred_fem_false))
+
+predict.data <- data.frame(possible_outcomes, amount)
+kable(head(predict.data), format= "markdown")
 ```
 
+I know this doesn't quite fit the contingency table form you showed in class, but I hope it's still clear. For reference, "pred_male_true" represents the number of users for which my model accurately predicted male. The other labels follow the same pattern. 
 
-### d)
+We see this is a fairly accurate model, as it predicts 83% of males correctly and 84% of females correctly. As I discussed in 1(b), the elements do not sum to 59946 since my model only considers users that submitted at least one ethnicity. 
+
+### d) BONUS
 
 Say we wanted to have a **false positive rate** of about 20%, i.e. of the people
 we predicted to be female, we want to be wrong no more than 20% of the time. What
@@ -111,6 +157,16 @@ What seasonal (i.e. cyclical) patterns do you observe?
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 
+jukebox1 <- jukebox %>%
+  mutate(new_date = parse_date_time(jukebox$date_time, "%a %b %d %H %M! %S! %Y!")) %>%
+  mutate(week = week(new_date)) %>%
+  mutate(year = year(new_date)) %>%
+  #unite("week_year", week, year, sep="-") %>%
+  group_by(week, year) %>%
+  tally()
+
+
+  
 ```
 
 
@@ -126,12 +182,23 @@ shift" during the academic year? Define
 * the academic year as September through May (inclusive)
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
+jukebox_grave <- jukebox %>%
+  mutate(new_date = parse_date_time(jukebox$date_time, "%a %b %d %H %M! %S! %Y!")) %>%
+  select(-date_time) %>%
+  mutate(hour = hour(new_date)) %>%
+  mutate(month = month(new_date)) %>%
+  filter(hour < 8) %>%
+  filter(month >= 9 | month <= 5) %>%
+  group_by(artist) %>%
+  tally() %>%
+  arrange(desc(n)) %>%
+  rename("Times Played" = n)
+
+kable(head(jukebox_grave, 10), format = "markdown")
 
 ```
 
-
-
-
+Woot woot! This result is self-explanatory. 
 
 ## Question 4:
 
@@ -145,7 +212,9 @@ Let the reference currency be US dollars. Analyze these results and provide
 insight to a foreign currency exchanger.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
-
+bitcoin <- Quandl("BAVERAGE/USD") %>% tbl_df()
+bitcoin
+bitcoin <- rename(bitcoin, Avg = `24h Average`, Total.Volume = `Total Volume`)
 ```
 
 
@@ -160,10 +229,24 @@ comparing cheese and milk production in the US from 1930 to today. Comment on th
 * Cheese [page](https://www.quandl.com/data/USDANASS/NASS_CHEESEPRODUCTIONMEASUREDINLB-Cheese-Production-Measured-In-Lb)
 * Milk [page](https://www.quandl.com/data/USDANASS/NASS_MILKPRODUCTIONMEASUREDINLB-Milk-Production-Measured-In-Lb)
 
-```{r, echo=FALSE, fig.width=12, fig.height=6}
+```{r, echo=TRUE, fig.width=12, fig.height=6}
 cheese <- Quandl("USDANASS/NASS_CHEESEPRODUCTIONMEASUREDINLB") %>% 
   tbl_df()
 milk <-  Quandl("USDANASS/NASS_MILKPRODUCTIONMEASUREDINLB") %>% 
   tbl_df()
-```
 
+milkcheese <- left_join(cheese, milk, by= "Date") %>%
+  mutate(year = year(Date))
+  #transmute(cheese = Value.x) %>%
+  #transmute(milk = Value.y) 
+  # Why are these not renaming? Argh
+
+ggplot(data=milkcheese, aes(year)) +
+  geom_line(aes(y=Value.x), colour="blue") + 
+  geom_line(aes(y=Value.y), colour="green") +
+  labs(x="Year", y= "Quantity Produced, Lbs") +
+  ggtitle("Milk and Cheese Quantity Produced by Year in America")
+
+```
+  
+The green line represents milk while the blue represents cheese (I'm not sure how to put this into a legend). We see clearly that American milk production has steadily increased since the early 1920s, whereas cheese production has remained very close to zero, only increasing slightly since the mid-1980s. 
