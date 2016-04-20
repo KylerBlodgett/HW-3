@@ -12,6 +12,7 @@ suppressPackageStartupMessages(library(Quandl))
 suppressPackageStartupMessages(library(tidyr))
 suppressPackageStartupMessages(library(knitr))
 suppressPackageStartupMessages(library(pander))
+suppressPackageStartupMessages(library(Rmisc))
 ```
 
 
@@ -20,8 +21,8 @@ suppressPackageStartupMessages(library(pander))
 Please indicate
 
 * Who you collaborated with: Laney, Christian, Paul
-* Roughly how much time you spent on this HW: 7 hours
-* What gave you the most trouble: Creating the 2x2 contingency table in 1(c). And manipulating the data in question 2 so that weeks didn't appear as "Week 12" but as actual dates.  
+* Roughly how much time you spent on this HW: 10 hours
+* What gave you the most trouble: Creating the 2x2 contingency table in 1(c). And manipulating the data in question 2 so that weeks didn't appear as "Week 12" but as actual dates. The "odds" part of interpreting the log regression coefficients in question 1 was a little tricky, but office hours helped. 
 * Any comments you have: 
 
 
@@ -76,10 +77,17 @@ ggplot(data=profiles_eth, aes(x=reorder(eth1, -n), y=n)) +
   ggtitle("Proprortion of Primary Ethnicities among Users who Identified") +
   labs(x="Ethnicities", y="Number of Users") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
 ```
 
-Here, I choose height as my continuous variable and first listed ethnicity ("eth1") as my categorical variable in predicting sex. Though many of the model's predictor variables are statistically significant (P-value < 0.05, with the excepton of indian and pacific islander ethnicities), most of the predicted coefficients are problematic. Coefficients represent the increase in percent likelihood that a given user is female associated with a unit increase in the predictor variable. Thus, the model predicts that an inch increase in hieght is associated with a 66% drecrease in likelihood of being female. This effect is unrealistically large. Similarly, claiming "black" as one's primary ethnicity is associated with a 147% increase in likelihood of being female, an effect so high it is nonsensical. The other categorical ethnicity predictor variables that are statistically significant also have absurdly high coefficients, the minimum having an absolute value of 0.65. We thus conclude that the model is not accurately predicting sex.
+Here, I choose height as my continuous variable and first listed ethnicity ("eth1") as my categorical variable in predicting sex. Many of the model's predictor variables have a statistically significant effect on the odds of being female, the dependent variable (P-value < 0.05, with the excepton of indian and pacific islander ethnicities). After raising both sides of the equation to the power of e, coefficients represent the multiplicative effect of a unit increase in the predictor variable on the odds that a given user is female. Thus, the model predicts that an inch increase in hieght is associated with a decrease of a factor of 0.516 (exp(B1-hat)) in odds of being female. The suggestion that taller users are less likely to be female makes intuitive sense. 
+
+We interpret the categorical variable "ethnicity" in a slightly different way. Because the variables are all dummy variables, the regression coefficients return their effect as compared to a base ethnic category. In our case, the base is Asian, so we interpret the coefficients as follows. Identifying one's primary ethnicity as "black" increases the odds of a user being female by exp(B2-hat), or 4.353, relative to an asian of equal height. This same calculation for other ethnicities is as follows:
+Hispanic/Latin; 1.932
+Middle Eastern; 1.827
+Native American; 2.971
+White; 1.938
+Indian and Pacific Islander ethnicities are found not to have a statistically significant impact on the odds of being female. 
+
 It is important to bear in mind that in only considering individuals that list at least one ethnicity, the model only considers around 12% of users, or 6859 observations. However, we are pretty protected from selection bias since among the users who listed an ethnicity, 38% are female, compared with 40% in the full data set. 
 
 ### b)
@@ -107,10 +115,11 @@ your table should be $n=59946$. Comment on how well our predictions fared.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 profiles1 <- profiles1 %>%
+  na.omit(height) %>%
   mutate(pred= predict(model)) %>%
   mutate(predicted_sex = ifelse(pred>=0.5, 1, 0)) %>%
   mutate(pred_male_true = ifelse(predicted_sex ==0 & is.female==0, 1, 0)) %>% 
-  mutate(pred_male_false = ifelse(predicted_sex ==0 & is.female==1, 1, 0)) %>% #if predicted male but was actually a female
+  mutate(pred_male_false = ifelse(predicted_sex ==0 & is.female==1, 1, 0)) %>% 
   mutate(pred_fem_true = ifelse(predicted_sex ==1 & is.female==1, 1, 0)) %>%
   mutate(pred_fem_false = ifelse(predicted_sex ==1 & is.female==0, 1, 0)) 
 
@@ -129,19 +138,6 @@ kable(head(predict.data), format= "markdown")
 I know this doesn't quite fit the contingency table form you showed in class, but I hope it's still clear. For reference, "pred_male_true" represents the number of users for which my model accurately predicted male. The other labels follow the same pattern. 
 
 We see this is a fairly accurate model, as it predicts 83% of males correctly and 84% of females correctly. As I discussed in 1(b), the elements do not sum to 59946 since my model only considers users that submitted at least one ethnicity. 
-
-### d) BONUS
-
-Say we wanted to have a **false positive rate** of about 20%, i.e. of the people
-we predicted to be female, we want to be wrong no more than 20% of the time. What
-decision threshold $p^*$ should we use?
-
-```{r, echo=FALSE, fig.width=12, fig.height=6}
-
-```
-
-
-
 
 
 ## Question 2:
@@ -164,12 +160,8 @@ jukebox1 <- jukebox %>%
   #unite("week_year", week, year, sep="-") %>%
   group_by(week, year) %>%
   tally()
-
-
   
 ```
-
-
 
 
 
@@ -192,7 +184,8 @@ jukebox_grave <- jukebox %>%
   group_by(artist) %>%
   tally() %>%
   arrange(desc(n)) %>%
-  rename("Times Played" = n)
+  mutate("Times_Played" = n) %>%
+  select(artist, Times_Played)
 
 kable(head(jukebox_grave, 10), format = "markdown")
 
@@ -213,13 +206,22 @@ insight to a foreign currency exchanger.
 
 ```{r, echo=FALSE, fig.width=12, fig.height=6}
 bitcoin <- Quandl("BAVERAGE/USD") %>% tbl_df()
-bitcoin
-bitcoin <- rename(bitcoin, Avg = `24h Average`, Total.Volume = `Total Volume`)
+
+bitcoin <- mutate(bitcoin, Avg = `24h Average`, Total.Volume = `Total Volume`) %>%
+  select(-`24h Average`, -`Total Volume`) %>%
+  arrange((Date)) %>%
+  mutate(rel_change = 100*(Avg - lag(Avg))/Avg)
+
+ggplot(data=bitcoin, aes(x=Date, y = rel_change)) +
+  geom_line() +
+  labs(x="Time", y="Relative Daily Price Change, as Percent") +
+  ggtitle("Relative Daily Change in Bitcoin Price in USD, July 2010 - Present") +
+  geom_smooth(n=100)
 ```
 
+We can draw a few insights from this graph of daily realitve change in bitcoin price over the last five and a half years. We note that price volatility seems to rise and drop in a wave-like fashion, with peaks occuring in Fall 2010, Summer 2011, Summer 2012, Spring and late Fall/Winter 2013, early 2015, and somewhat in Fall 2015. With suprising reglarity, these "mounds" of increased volatility have happened approximately every nine months to twelve months. Importantly, within every mound prices are varying both positively and negatively, which is why the blue mean line never departs from the horizontal zero for long. 
 
-
-
+Following from this first observation of mounds, we turn to practical advice for a foreign currency exchanger. We observe that the current date, April 2016, seems to be in a trough of non-volatility (i.e., not a mound). As the last mound peaked in Fall 2015, we can expect another mound of volatility to peak in about 4-7 months, in keeping with the nine month to twelve cycle. Therefore, we can expect 4-7 months of relative stability, a hospitable environment for investors looking to play it safe. But towards late Summer/Fall of 2016, we will likely begin to see greater positive and negative volatility as part of the upcoming mound. 
 
 ## Question 5:
 
@@ -229,24 +231,52 @@ comparing cheese and milk production in the US from 1930 to today. Comment on th
 * Cheese [page](https://www.quandl.com/data/USDANASS/NASS_CHEESEPRODUCTIONMEASUREDINLB-Cheese-Production-Measured-In-Lb)
 * Milk [page](https://www.quandl.com/data/USDANASS/NASS_MILKPRODUCTIONMEASUREDINLB-Milk-Production-Measured-In-Lb)
 
-```{r, echo=TRUE, fig.width=12, fig.height=6}
+```{r, echo=FALSE, fig.width=12, fig.height=6}
 cheese <- Quandl("USDANASS/NASS_CHEESEPRODUCTIONMEASUREDINLB") %>% 
   tbl_df()
 milk <-  Quandl("USDANASS/NASS_MILKPRODUCTIONMEASUREDINLB") %>% 
   tbl_df()
 
 milkcheese <- left_join(cheese, milk, by= "Date") %>%
-  mutate(year = year(Date))
-  #transmute(cheese = Value.x) %>%
-  #transmute(milk = Value.y) 
-  # Why are these not renaming? Argh
+  mutate(year = year(Date)) %>%
+  arrange(year) %>%
+  filter(year>=1930) %>%
+  mutate("cheese" = Value.x) %>%
+  mutate("milk" = Value.y) %>%
+  select(year, cheese, milk) %>%
+  mutate(cheese_change = 100*(cheese - lag(cheese))/cheese) %>%
+  mutate(milk_change = 100*(milk - lag(milk))/milk)
+
+c_avg <- mean(milkcheese$cheese_change, na.rm=TRUE)
+c_avg
+
+m_avg <- mean(milkcheese$milk_change, na.rm=TRUE)
+m_avg
 
 ggplot(data=milkcheese, aes(year)) +
-  geom_line(aes(y=Value.x), colour="blue") + 
-  geom_line(aes(y=Value.y), colour="green") +
-  labs(x="Year", y= "Quantity Produced, Lbs") +
-  ggtitle("Milk and Cheese Quantity Produced by Year in America")
+  geom_line(aes(y=cheese), colour="blue") +
+  labs(x="Year", y= "Cheese Produced, Lbs") +
+  ggtitle("Cheese Quantity Produced by Year in America")
+
+ggplot(data=milkcheese, aes(year)) +
+  geom_line(aes(y=cheese_change), color="blue") +
+  labs(x="Year", y="Percent Change in Yearly Cheese Price, Average in Black") +
+  geom_hline(yintercept = 0, color="red") +
+  geom_hline(yintercept = c_avg, color="black")
+
+ggplot(data=milkcheese, aes(year)) +
+  geom_line(aes(y=milk), colour="purple") +
+  labs(x="Year", y= "Milk Produced, Lbs") +
+  ggtitle("Milk Quantity Produced by Year in America")
+
+ggplot(data=milkcheese, aes(year)) +
+  geom_line(aes(y=milk_change), color="purple") +
+  labs(x="Year", y="Percent Change in Yearly Milk Price, Average in Black") +
+  geom_hline(yintercept = 0, color="red") +
+  geom_hline(yintercept = m_avg, color="black")
 
 ```
   
-The green line represents milk while the blue represents cheese (I'm not sure how to put this into a legend). We see clearly that American milk production has steadily increased since the early 1920s, whereas cheese production has remained very close to zero, only increasing slightly since the mid-1980s. 
+These four graphs offer several insights into the American milk and cheese industry since 1930. Most clearly, we see that America has historically produced nearly 20 times more pounds of milk than it has of cheese. However, production in both sectors has seen fairly consistent growth since 1930, with the cheese sector particularly exploding since around 1970. 
+
+More interesting than net weight of production is the volatility of production that graphs 2 (for cheese) and 4 (for milk) illustrate. Relative rise or fall in production has been extremely volatile, especially in the milk industry where streaks of more than a few years of either continuously positive or negative price change are rare. This is reflected in the very low average change in yearly production of milk, 0.83%. Cheese production is also volatile year-to-year, but experiences fewer and fewer yearly drops in production, especially after 1955. Though it produces less poundage than the milk industry, the relatively high average change in yearly cheese production of 3.52% speaks to the sustained growth of the American cheese industry. 
